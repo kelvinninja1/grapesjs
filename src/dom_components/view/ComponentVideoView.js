@@ -1,21 +1,27 @@
-var Backbone = require('backbone');
-var ComponentView = require('./ComponentImageView');
-var OComponentView = require('./ComponentView');
+import ComponentView from './ComponentImageView';
+import OComponentView from './ComponentView';
 
-module.exports = ComponentView.extend({
+export default ComponentView.extend({
   tagName: 'div',
 
   events: {},
 
   initialize(o) {
     OComponentView.prototype.initialize.apply(this, arguments);
-    this.listenTo(this.model, 'change:src', this.updateSrc);
-    this.listenTo(
-      this.model,
-      'change:loop change:autoplay change:controls change:color change:rel change:modestbranding change:poster',
-      this.updateVideo
-    );
-    this.listenTo(this.model, 'change:provider', this.updateProvider);
+    const { model } = this;
+    const props = [
+      'loop',
+      'autoplay',
+      'controls',
+      'color',
+      'rel',
+      'modestbranding',
+      'poster'
+    ];
+    const events = props.map(p => `change:${p}`).join(' ');
+    this.listenTo(model, 'change:provider', this.updateProvider);
+    this.listenTo(model, 'change:src', this.updateSrc);
+    this.listenTo(model, events, this.updateVideo);
   },
 
   /**
@@ -33,20 +39,24 @@ module.exports = ComponentView.extend({
    * @private
    */
   updateSrc() {
-    var prov = this.model.get('provider');
-    var src = this.model.get('src');
+    const { model, videoEl } = this;
+    if (!videoEl) return;
+    const prov = model.get('provider');
+    let src = model.get('src');
+
     switch (prov) {
       case 'yt':
-        src = this.model.getYoutubeSrc();
+        src = model.getYoutubeSrc();
         break;
       case 'ytnc':
-        src = this.model.getYoutubeNoCookieSrc();
+        src = model.getYoutubeNoCookieSrc();
         break;
       case 'vi':
-        src = this.model.getVimeoSrc();
+        src = model.getVimeoSrc();
         break;
     }
-    this.videoEl.src = src;
+
+    videoEl.src = src;
   },
 
   /**
@@ -135,6 +145,7 @@ module.exports = ComponentView.extend({
     this.updateClasses();
     var prov = this.model.get('provider');
     this.el.appendChild(this.renderByProvider(prov));
+    this.updateVideo();
     return this;
   }
 });

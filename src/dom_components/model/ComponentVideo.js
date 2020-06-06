@@ -1,10 +1,11 @@
-const Component = require('./ComponentImage');
-const OComponent = require('./Component');
+import Component from './ComponentImage';
+import OComponent from './Component';
+
 const yt = 'yt';
 const vi = 'vi';
 const ytnc = 'ytnc';
 
-module.exports = Component.extend(
+export default Component.extend(
   {
     defaults: {
       ...Component.prototype.defaults,
@@ -12,7 +13,7 @@ module.exports = Component.extend(
       tagName: 'video',
       videoId: '',
       void: 0,
-      provider: '', // on change of provider, traits are switched
+      provider: 'so', // on change of provider, traits are switched
       ytUrl: 'https://www.youtube.com/embed/',
       ytncUrl: 'https://www.youtube-nocookie.com/embed/',
       viUrl: 'https://player.vimeo.com/video/',
@@ -155,7 +156,6 @@ module.exports = Component.extend(
         label: 'Provider',
         name: 'provider',
         changeProp: 1,
-        value: this.get('provider'),
         options: [
           { value: 'so', name: 'HTML5 Source' },
           { value: yt, name: 'Youtube' },
@@ -182,8 +182,8 @@ module.exports = Component.extend(
         {
           label: 'Poster',
           name: 'poster',
-          placeholder: 'eg. ./media/image.jpg',
-          changeProp: 1
+          placeholder: 'eg. ./media/image.jpg'
+          // changeProp: 1
         },
         this.getAutoplayTrait(),
         this.getLoopTrait(),

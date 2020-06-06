@@ -1,10 +1,10 @@
-import _ from 'underscore';
+import { template } from 'underscore';
 import Backbone from 'backbone';
 import fetch from 'utils/fetch';
 
-module.exports = Backbone.View.extend(
+export default Backbone.View.extend(
   {
-    template: _.template(`
+    template: template(`
   <form>
     <div id="<%= pfx %>title"><%= title %></div>
     <input type="file" id="<%= uploadId %>" name="file" accept="*/*" <%= disabled ? 'disabled' : '' %> <%= multiUpload ? 'multiple' : '' %>/>
@@ -18,6 +18,7 @@ module.exports = Backbone.View.extend(
       this.options = opts;
       const c = opts.config || {};
       this.config = c;
+      this.em = this.config.em;
       this.pfx = c.stylePrefix || '';
       this.ppfx = c.pStylePrefix || '';
       this.target = this.options.globalCollection || {};
@@ -54,8 +55,11 @@ module.exports = Backbone.View.extend(
      * @private
      */
     onUploadEnd(res) {
-      const em = this.config.em;
+      const { $el, config } = this;
+      const em = config.em;
       em && em.trigger('asset:upload:end', res);
+      const input = $el.find('input');
+      input && input.val('');
     },
 
     /**
@@ -105,6 +109,11 @@ module.exports = Backbone.View.extend(
     uploadFile(e, clb) {
       const files = e.dataTransfer ? e.dataTransfer.files : e.target.files;
       const { config } = this;
+      const { beforeUpload } = config;
+
+      const beforeUploadResponse = beforeUpload && beforeUpload(files);
+      if (beforeUploadResponse === false) return;
+
       const body = new FormData();
       const { params, customFetch } = config;
 
@@ -237,17 +246,18 @@ module.exports = Backbone.View.extend(
     },
 
     render() {
-      this.$el.html(
+      const { $el, pfx, em } = this;
+      $el.html(
         this.template({
-          title: this.config.uploadText,
+          title: em && em.t('assetManager.uploadTitle'),
           uploadId: this.uploadId,
           disabled: this.disabled,
           multiUpload: this.multiUpload,
-          pfx: this.pfx
+          pfx
         })
       );
       this.initDrop();
-      this.$el.attr('class', this.pfx + 'file-uploader');
+      $el.attr('class', pfx + 'file-uploader');
       return this;
     }
   },

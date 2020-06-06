@@ -1,8 +1,9 @@
 import Backbone from 'backbone';
 import { isString, isObject, isFunction } from 'underscore';
+
 const $ = Backbone.$;
 
-module.exports = Backbone.View.extend({
+export default Backbone.View.extend({
   tagName() {
     return this.model.get('tagName');
   },
@@ -54,7 +55,12 @@ module.exports = Backbone.View.extend({
    * @return   void
    * */
   updateAttributes() {
-    this.$el.attr(this.model.get('attributes'));
+    const { em, model, $el } = this;
+    const attr = model.get('attributes') || {};
+    const title = em && em.t && em.t(`panels.buttons.titles.${model.id}`);
+    $el.attr(attr);
+    title && $el.attr({ title });
+
     this.updateClassName();
   },
 
@@ -75,34 +81,32 @@ module.exports = Backbone.View.extend({
    *
    * @return   void
    * */
-  updateActive() {
-    const { model, commands, em } = this;
+  updateActive(opts = {}) {
+    const { model, commands, $el, activeCls } = this;
+    const { fromCollection } = opts;
     const context = model.get('context');
     const options = model.get('options');
+    const commandName = model.get('command');
     let command = {};
-    var editor = em && em.get ? em.get('Editor') : null;
-    var commandName = model.get('command');
-    var cmdIsFunc = isFunction(commandName);
 
     if (commands && isString(commandName)) {
       command = commands.get(commandName) || {};
-    } else if (cmdIsFunc) {
+    } else if (isFunction(commandName)) {
       command = commands.create({ run: commandName });
     } else if (commandName !== null && isObject(commandName)) {
       command = commands.create(commandName);
     }
 
     if (model.get('active')) {
-      model.collection.deactivateAll(context);
+      !fromCollection && model.collection.deactivateAll(context, model);
       model.set('active', true, { silent: true }).trigger('checkActive');
       commands.runCommand(command, { ...options, sender: model });
 
-      // Disable button if the command was just a function
-      cmdIsFunc && model.set('active', false);
+      // Disable button if the command has no stop method
+      command.noStop && model.set('active', false);
     } else {
-      this.$el.removeClass(this.activeCls);
-      model.collection.deactivateAll(context);
-      commands.stopCommand(command, { ...options, sender: model });
+      $el.removeClass(activeCls);
+      commands.stopCommand(command, { ...options, sender: model, force: 1 });
     }
   },
 
@@ -133,10 +137,10 @@ module.exports = Backbone.View.extend({
 
     if (this.model.get('disable')) return;
 
-    this.toogleActive();
+    this.toggleActive();
   },
 
-  toogleActive() {
+  toggleActive() {
     const { model } = this;
     const { active, togglable } = model.attributes;
 

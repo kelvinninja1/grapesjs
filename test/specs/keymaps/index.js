@@ -1,5 +1,5 @@
 import Editor from 'editor/index';
-const Keymaps = require('keymaps');
+import Keymaps from 'keymaps';
 
 describe('Keymaps', () => {
   describe('Main', () => {
@@ -41,7 +41,7 @@ describe('Keymaps', () => {
       const id = 'test';
       const keys = 'ctrl+a';
       const handler = () => {};
-      const model = obj.add(id, 'ctrl+a', handler);
+      const model = obj.add(id, keys, handler);
       const removed = obj.remove(id);
       expect(obj.get(id)).toEqual(undefined);
       expect(obj.getAll()).toEqual({});

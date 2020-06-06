@@ -1,11 +1,12 @@
 import Backbone from 'backbone';
-import { isArray, isEmpty, each, keys } from 'underscore';
+import { isEmpty, each, keys } from 'underscore';
+import Components from '../model/Components';
+import ComponentsView from './ComponentsView';
+import Selectors from 'selector_manager/model/Selectors';
+import { replaceWith } from 'utils/dom';
+import { setViewEl, getElRect } from 'utils/mixins';
 
-const Components = require('../model/Components');
-const ComponentsView = require('./ComponentsView');
-const Selectors = require('selector_manager/model/Selectors');
-
-module.exports = Backbone.View.extend({
+export default Backbone.View.extend({
   className() {
     return this.getClasses();
   },
@@ -19,6 +20,8 @@ module.exports = Backbone.View.extend({
     const config = opt.config || {};
     const em = config.em;
     const modelOpt = model.opt || {};
+    const { $el, el } = this;
+    const { draggableComponents } = config;
     this.opts = opt;
     this.modelOpt = modelOpt;
     this.config = config;
@@ -27,21 +30,40 @@ module.exports = Backbone.View.extend({
     this.ppfx = config.pStylePrefix || '';
     this.attr = model.get('attributes');
     this.classe = this.attr.class || [];
-    const $el = this.$el;
     this.listenTo(model, 'change:style', this.updateStyle);
-    this.listenTo(model, 'change:attributes', this.renderAttributes);
+    this.listenTo(
+      model,
+      'change:attributes change:_innertext',
+      this.renderAttributes
+    );
     this.listenTo(model, 'change:highlightable', this.updateHighlight);
     this.listenTo(model, 'change:status', this.updateStatus);
-    this.listenTo(model, 'change:state', this.updateState);
-    this.listenTo(model, 'change:script', this.render);
+    this.listenTo(model, 'change:script', this.reset);
     this.listenTo(model, 'change:content', this.updateContent);
     this.listenTo(model, 'change', this.handleChange);
     this.listenTo(model, 'active', this.onActive);
+    this.listenTo(model, 'disable', this.onDisable);
     $el.data('model', model);
+    setViewEl(el, this);
     model.view = this;
+    this._getFrame() && model.views.push(this);
     this.initClasses();
     this.initComponents({ avoidRender: 1 });
-    !modelOpt.temporary && this.init();
+    this.events = {
+      ...this.events,
+      ...(draggableComponents && { dragstart: 'handleDragStart' })
+    };
+    this.delegateEvents();
+    !modelOpt.temporary && this.init(this._clbObj());
+  },
+
+  _clbObj() {
+    const { em, model, el } = this;
+    return {
+      editor: em && em.getEditor(),
+      model,
+      el
+    };
   },
 
   /**
@@ -50,9 +72,52 @@ module.exports = Backbone.View.extend({
   init() {},
 
   /**
+   * Remove callback
+   */
+  removed() {},
+
+  /**
    * Callback executed when the `active` event is triggered on component
    */
   onActive() {},
+
+  /**
+   * Callback executed when the `disable` event is triggered on component
+   */
+  onDisable() {},
+
+  remove() {
+    const view = this;
+    Backbone.View.prototype.remove.apply(view, arguments);
+    const { model } = view;
+    const frame = view._getFrame() || {};
+    const frameM = frame.model;
+    model.components().forEach(comp => {
+      const view = comp.getView(frameM);
+      view && view.remove();
+    });
+    const { views } = model;
+    views.splice(views.indexOf(view), 1);
+    view.removed(view._clbObj());
+    view.$el.data({ model: '', collection: '', view: '' });
+    delete view.model;
+    delete view.$el;
+    delete view.el.__gjsv;
+    delete view.childrenView;
+    delete view.scriptContainer;
+    delete view.opts;
+    // delete view.el;
+    return view;
+  },
+
+  handleDragStart(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.em.get('Commands').run('tlb-move', {
+      target: this.model,
+      event
+    });
+  },
 
   initClasses() {
     const { model } = this;
@@ -87,7 +152,9 @@ module.exports = Backbone.View.extend({
    * @private
    */
   handleChange() {
-    const model = this.model;
+    const { model } = this;
+    const chgArr = keys(model.changed);
+    if (chgArr.length === 1 && chgArr[0] === 'status') return;
     model.emitUpdate();
 
     for (let prop in model.changed) {
@@ -110,22 +177,6 @@ module.exports = Backbone.View.extend({
   },
 
   /**
-   * Fires on state update. If the state is not empty will add a helper class
-   * @param  {Event} e
-   * @private
-   * */
-  updateState(e) {
-    var cl = 'hc-state';
-    var state = this.model.get('state');
-
-    if (state) {
-      this.$el.addClass(cl);
-    } else {
-      this.$el.removeClass(cl);
-    }
-  },
-
-  /**
    * Update item on status change
    * @param  {Event} e
    * @private
@@ -136,7 +187,7 @@ module.exports = Backbone.View.extend({
     const status = this.model.get('status');
     const pfx = this.pfx;
     const ppfx = this.ppfx;
-    const selectedCls = `${pfx}selected`;
+    const selectedCls = `${ppfx}selected`;
     const selectedParentCls = `${selectedCls}-parent`;
     const freezedCls = `${ppfx}freezed`;
     const hoveredCls = `${ppfx}hovered`;
@@ -181,11 +232,14 @@ module.exports = Backbone.View.extend({
    * @private
    * */
   updateStyle() {
-    const em = this.em;
-    const model = this.model;
+    const { model, em, el } = this;
 
-    if (em && em.get('avoidInlineStyle')) {
-      this.el.id = model.getId();
+    if (em && em.getConfig('avoidInlineStyle')) {
+      if (model.get('_innertext')) {
+        el.removeAttribute('id');
+      } else {
+        el.id = model.getId();
+      }
       const style = model.getStyle();
       !isEmpty(style) && model.setStyle(style);
     } else {
@@ -235,12 +289,21 @@ module.exports = Backbone.View.extend({
    * */
   updateAttributes() {
     const attrs = [];
-    const { model, $el, el } = this;
-    const defaultAttr = { 'data-gjs-type': model.get('type') || 'default' };
+    const { model, $el, el, config } = this;
+    const { highlightable, textable, type, _innertext } = model.attributes;
+    const { draggableComponents } = config;
 
-    if (model.get('highlightable')) {
-      defaultAttr['data-highlightable'] = 1;
-    }
+    const defaultAttr = {
+      'data-gjs-type': type || 'default',
+      ...(draggableComponents && !_innertext ? { draggable: true } : {}),
+      ...(highlightable ? { 'data-highlightable': 1 } : {}),
+      ...(textable
+        ? {
+            contenteditable: 'false',
+            'data-gjs-textable': 'true'
+          }
+        : {})
+    };
 
     // Remove all current attributes
     each(el.attributes, attr => attrs.push(attr.nodeName));
@@ -279,15 +342,13 @@ module.exports = Backbone.View.extend({
    * @private
    */
   updateScript() {
-    if (!this.model.get('script')) {
-      return;
-    }
-
-    var em = this.em;
-    if (em) {
-      var canvas = em.get('Canvas');
-      canvas.getCanvasView().updateScript(this);
-    }
+    const { model, em } = this;
+    if (!model.get('script')) return;
+    em &&
+      em
+        .get('Canvas')
+        .getCanvasView()
+        .updateScript(this);
   },
 
   /**
@@ -327,17 +388,108 @@ module.exports = Backbone.View.extend({
   },
 
   /**
+   * This returns rect informations not affected by the canvas zoom.
+   * The method `getBoundingClientRect` doesn't work here and we
+   * have to take in account offsetParent
+   */
+  getOffsetRect() {
+    const rect = {};
+    const target = this.el;
+    let gtop = 0;
+    let gleft = 0;
+
+    const assignRect = el => {
+      const { offsetParent } = el;
+
+      if (offsetParent) {
+        gtop += offsetParent.offsetTop;
+        gleft += offsetParent.offsetLeft;
+        assignRect(offsetParent);
+      } else {
+        rect.top = target.offsetTop + gtop;
+        rect.left = target.offsetLeft + gleft;
+        rect.bottom = rect.top + target.offsetHeight;
+        rect.right = rect.left + target.offsetWidth;
+      }
+    };
+    assignRect(target);
+
+    return rect;
+  },
+
+  isInViewport({ rect } = {}) {
+    const { el } = this;
+    const elDoc = el.ownerDocument;
+    const { body } = elDoc;
+    const { frameElement } = elDoc.defaultView;
+    const { top, left } = rect || this.getOffsetRect();
+    const frame = this._getFrame().getOffsetRect();
+
+    return (
+      top >= frame.scrollTop &&
+      left >= frame.scrollLeft &&
+      top <= frame.scrollBottom &&
+      left <= frameElement.offsetWidth + body.scrollLeft
+    );
+  },
+
+  scrollIntoView(opts = {}) {
+    const rect = this.getOffsetRect();
+    const isInViewport = this.isInViewport({ rect });
+
+    if (!isInViewport || opts.force) {
+      const { el } = this;
+
+      // PATCH: scrollIntoView won't work with multiple requests from iframes
+      if (opts.behavior !== 'smooth') {
+        el.ownerDocument.defaultView.scrollTo(0, rect.top);
+      } else {
+        el.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          ...opts
+        });
+      }
+    }
+  },
+
+  /**
+   * Recreate the element of the view
+   */
+  reset() {
+    const { el } = this;
+    this.el = '';
+    this._ensureElement();
+    this._setData();
+    replaceWith(el, this.el);
+    this.render();
+  },
+
+  _setData() {
+    const { model } = this;
+    const collection = model.components();
+    const view = this;
+    this.$el.data({ model, collection, view });
+  },
+
+  _getFrame() {
+    return this.config.frameView;
+  },
+
+  /**
    * Render children components
    * @private
    */
   renderChildren() {
     this.updateContent();
     const container = this.getChildrenContainer();
-    const view = new ComponentsView({
-      collection: this.model.get('components'),
-      config: this.config,
-      componentTypes: this.opts.componentTypes
-    });
+    const view =
+      this.childrenView ||
+      new ComponentsView({
+        collection: this.model.get('components'),
+        config: this.config,
+        componentTypes: this.opts.componentTypes
+      });
 
     view.render(container);
     this.childrenView = view;
@@ -355,8 +507,10 @@ module.exports = Backbone.View.extend({
 
   render() {
     this.renderAttributes();
+    if (this.modelOpt.temporary) return this;
     this.renderChildren();
     this.updateScript();
+    setViewEl(this.el, this);
     this.postRender();
 
     return this;
@@ -366,7 +520,7 @@ module.exports = Backbone.View.extend({
     const { em, model, modelOpt } = this;
 
     if (!modelOpt.temporary) {
-      this.onRender();
+      this.onRender(this._clbObj());
       em && em.trigger('component:mount', model);
     }
   },
